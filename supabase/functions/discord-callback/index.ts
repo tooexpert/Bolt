@@ -2,6 +2,8 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
 const DISCORD_GUILD_ID = "1369832704102633554";
 const ELDER_MEMBER_ROLE_ID = "1369835461551456347";
+const OFFICER_ROLE_ID = "1369836381647405067";
+const APPLICANT_ROLE_ID = "1501943775021371543";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -26,7 +28,10 @@ Deno.serve(async (req: Request) => {
     }
 
     let isElderMember = false;
+    let isOfficer = false;
+    let isApplicant = false;
     let method = "none";
+    let userRoles: string[] = [];
 
     // Method 1: Use provider_token (OAuth Bearer token) to check guild membership
     if (provider_token) {
@@ -40,7 +45,10 @@ Deno.serve(async (req: Request) => {
 
         if (response.ok) {
           const member = await response.json();
-          isElderMember = member.roles?.includes(ELDER_MEMBER_ROLE_ID) ?? false;
+          userRoles = member.roles ?? [];
+          isElderMember = userRoles.includes(ELDER_MEMBER_ROLE_ID);
+          isOfficer = userRoles.includes(OFFICER_ROLE_ID);
+          isApplicant = userRoles.includes(APPLICANT_ROLE_ID);
           method = "provider_token";
         } else {
           const errText = await response.text();
@@ -51,8 +59,8 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // Method 2: Use bot token if provider_token didn't work
-    if (!isElderMember) {
+    // Method 2: Use bot token if needed
+    if (method === "none") {
       const botToken = Deno.env.get("DISCORD_BOT_TOKEN");
       if (botToken) {
         try {
@@ -65,7 +73,10 @@ Deno.serve(async (req: Request) => {
 
           if (response.ok) {
             const member = await response.json();
-            isElderMember = member.roles?.includes(ELDER_MEMBER_ROLE_ID) ?? false;
+            userRoles = member.roles ?? [];
+            isElderMember = userRoles.includes(ELDER_MEMBER_ROLE_ID);
+            isOfficer = userRoles.includes(OFFICER_ROLE_ID);
+            isApplicant = userRoles.includes(APPLICANT_ROLE_ID);
             method = "bot_token";
           } else {
             const errText = await response.text();
@@ -77,13 +88,12 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // Method 3: Use client credentials to check - fetch member list and search
-    if (!isElderMember) {
+    // Method 3: Use client credentials
+    if (method === "none") {
       const clientId = Deno.env.get("DISCORD_CLIENT_ID");
       const clientSecret = Deno.env.get("DISCORD_CLIENT_SECRET");
       if (clientId && clientSecret) {
         try {
-          // Get bot-like access token using client credentials
           const tokenResponse = await fetch("https://discord.com/api/v10/oauth2/token", {
             method: "POST",
             headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -106,7 +116,10 @@ Deno.serve(async (req: Request) => {
 
             if (response.ok) {
               const member = await response.json();
-              isElderMember = member.roles?.includes(ELDER_MEMBER_ROLE_ID) ?? false;
+              userRoles = member.roles ?? [];
+              isElderMember = userRoles.includes(ELDER_MEMBER_ROLE_ID);
+              isOfficer = userRoles.includes(OFFICER_ROLE_ID);
+              isApplicant = userRoles.includes(APPLICANT_ROLE_ID);
               method = "client_credentials";
             }
           }
@@ -116,7 +129,7 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    console.log(`Role check result: isElderMember=${isElderMember}, method=${method}, discord_id=${discord_id}`);
+    console.log(`Role check result: isElderMember=${isElderMember}, isOfficer=${isOfficer}, isApplicant=${isApplicant}, method=${method}, discord_id=${discord_id}`);
 
     // Upsert member into database
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
@@ -174,7 +187,12 @@ Deno.serve(async (req: Request) => {
     }
 
     return new Response(
-      JSON.stringify({ is_elder_member: isElderMember, method }),
+      JSON.stringify({
+        is_elder_member: isElderMember,
+        is_officer: isOfficer,
+        is_applicant: isApplicant,
+        method
+      }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err) {
